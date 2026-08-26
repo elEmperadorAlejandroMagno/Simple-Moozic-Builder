@@ -50,6 +50,16 @@ except Exception:
 
 CASSETTE_TILE = "tsarcraft_music_01_62"
 VINYL_TILE = "tsarcraft_music_01_63"
+# NOTE: CD support ships with a single, fixed default design (no per-song
+# variants, no custom cover mode) -- adjust these four constants to match
+# the actual tile id / mesh / texture / icon names bundled with your
+# TrueMoozic default assets (they follow the same TC-prefix convention as
+# the pre-existing cassette/vinyl default asset pool).
+CD_TILE = "tsarcraft_music_01_64"
+CD_MESH = "WorldItems/TCCD"
+CD_TEXTURE = "WorldItems/TCCD"
+CD_ICON = "TCCD"
+CD_MODEL_NAME = "TCCD"
 CASSETTE_VARIANT_MIN = 1
 CASSETTE_VARIANT_MAX = 19
 VINYL_RECORD_VARIANT_MIN = 1
@@ -140,6 +150,35 @@ def sanitize_id(value: str) -> str:
     if not base:
         base = "Track"
     return base[:48]
+
+
+def _make_variant_cycler(variants: list[int]) -> Callable[[], int]:
+    """Returns a no-argument picker that draws from `variants` without
+    repeating any value until the whole pool has been used once ("shuffle
+    bag" pattern). Plain random.choice()/random.randint() picks each item
+    independently, so with N items and a pool of size K the odds of at
+    least one duplicate are high even when N <= K (birthday paradox), and
+    become a certainty once N > K. This guarantees maximum variety instead.
+    """
+    pool = list(dict.fromkeys(variants))  # de-dupe, preserve order
+    if not pool:
+        raise ValueError("variant pool is empty")
+    state: dict[str, object] = {"bag": [], "last": None}
+
+    def _pick() -> int:
+        if not state["bag"]:
+            bag = pool[:]
+            random.shuffle(bag)
+            # Avoid the last item of the previous lap immediately repeating
+            # as the first item of the new lap, when that's possible.
+            if len(bag) > 1 and state["last"] is not None and bag[-1] == state["last"]:
+                bag[0], bag[-1] = bag[-1], bag[0]
+            state["bag"] = bag
+        n = state["bag"].pop()
+        state["last"] = n
+        return n
+
+    return _pick
 
 
 def unique_sanitize_id(value: str, used_ids: set[str]) -> str:
@@ -573,6 +612,7 @@ def bundle_standalone_redundancy(paths: dict[str, Path], assets_root: Path) -> N
         "TMVinylrecord.fbx",
         "TMVinylalbum.fbx",
         "TMVinylbooklet.fbx",
+        "TCCD.fbx",
     ]
     for model_name in model_names:
         copy_file_if_exists(models_root / model_name, out_models / model_name)
@@ -616,15 +656,23 @@ def bundle_standalone_redundancy(paths: dict[str, Path], assets_root: Path) -> N
             textures_root / "WorldItems" / "Vinyl" / "Album" / f"Item_TCVinylrecord{i}.png",
             out_textures / "WorldItems" / "Vinyl" / "Album" / f"Item_TCVinylrecord{i}.png",
         )
-        # Album inventory icon alias used by builder output.
-        if not copy_file_if_exists(
+        copy_file_if_exists(
             textures_root / f"Item_TCAlbum{i}.png",
             out_textures / f"Item_TCAlbum{i}.png",
-        ):
-            copy_file_if_exists(
-                textures_root / "Icons" / "Vinyl" / "Album" / f"Item_TCVinylrecord{i}.png",
-                out_textures / f"Item_TCAlbum{i}.png",
-            )
+        ) or copy_file_if_exists(
+            textures_root / "Icons" / "Vinyl" / "Album" / f"Item_TCVinylrecord{i}.png",
+            out_textures / f"Item_TCAlbum{i}.png",
+        )
+
+    # CD default (single, fixed) design.
+    copy_file_if_exists(
+        textures_root / "Icons" / "CD" / f"Item_{CD_ICON}.png",
+        out_textures / "Icons" / "CD" / f"Item_{CD_ICON}.png",
+    )
+    copy_file_if_exists(
+        textures_root / "WorldItems" / "CD" / f"{CD_TEXTURE.split('/')[-1]}.png",
+        out_textures / "WorldItems" / "CD" / f"{CD_TEXTURE.split('/')[-1]}.png",
+    )
 
 
 def write_workshop(root: Path, name: str, songs: Optional[list[str]] = None) -> None:
@@ -660,15 +708,17 @@ def _workshop_mix_table_lines(tracks: list[str]) -> list[str]:
     return out
 
 
-def _workshop_mode_label(include_cassette: bool, include_vinyl: bool, is_mixtape: bool) -> str:
-    if include_cassette and include_vinyl:
-        base = "Cassette & Vinyl"
-    elif include_cassette:
-        base = "Cassette"
-    elif include_vinyl:
-        base = "Vinyl"
-    else:
+def _workshop_mode_label(include_cassette: bool, include_vinyl: bool, is_mixtape: bool, include_cd: bool = False) -> str:
+    parts = []
+    if include_cassette:
+        parts.append("Cassette")
+    if include_vinyl:
+        parts.append("Vinyl")
+    if include_cd:
+        parts.append("CD")
+    if not parts:
         return ""
+    base = " & ".join(parts)
     if is_mixtape:
         base = f"Mixtape {base}"
     return f"[i]{base}[/i]"
@@ -1721,6 +1771,9 @@ def build_cassette(args, on_track: Optional[Callable[[BuildTrackEvent], None]] =
     song_use_random_cassette = set(getattr(args, "song_use_random_cassette", []) or [])
     total_tracks = len(oggs)
     used_item_ids: set[str] = set()
+    pick_tape_variant = _make_variant_cycler(
+        list(range(CASSETTE_VARIANT_MIN, CASSETTE_VARIANT_MAX + 1))
+    )
     for idx, ogg in enumerate(oggs, start=1):
         iid = unique_sanitize_id(ogg.name, used_item_ids)
         disp = str(song_display_names.get(ogg.name) or display_name_from_file(ogg))
@@ -1794,7 +1847,7 @@ def build_cassette(args, on_track: Optional[Callable[[BuildTrackEvent], None]] =
                 ]
             )
         else:
-            tape_n = random.randint(CASSETTE_VARIANT_MIN, CASSETTE_VARIANT_MAX)
+            tape_n = pick_tape_variant()
             icon = f"TCTape{tape_n}"
             model_name = icon
             cassette_assignments.append((disp, tape_n))
@@ -2045,6 +2098,8 @@ def build_vinyl(args, on_track: Optional[Callable[[BuildTrackEvent], None]] = No
             f"({len(record_variants)}), albums {VINYL_ALBUM_VARIANT_MIN}..{VINYL_ALBUM_VARIANT_MAX} "
             f"({len(album_variants)})"
         )
+        pick_record_variant = _make_variant_cycler(record_variants)
+        pick_album_variant = _make_variant_cycler(album_variants)
 
     sounds = [f"module {module_name}", "{", "\timports", "\t{", "\t\tBase", "\t}", ""]
     items = [f"module {module_name}", "{", "\timports", "\t{", "\t\tBase", "\t}", ""]
@@ -2082,8 +2137,8 @@ def build_vinyl(args, on_track: Optional[Callable[[BuildTrackEvent], None]] = No
             cover = cover_cache[cover_path]
             _save_hr_cover(cover_path, paths["hr"] / f"VinylAlbum_{iid}.png")
         else:
-            record_n = random.choice(record_variants)
-            album_n = random.choice(album_variants)
+            record_n = pick_record_variant()
+            album_n = pick_album_variant()
             random_assignments.append((disp, record_n, album_n))
             # Builder visualization: prefer album-roll art for random vinyl rows
             # so preview tiles show the more distinct 1..12 covers.
@@ -2317,6 +2372,134 @@ def build_vinyl(args, on_track: Optional[Callable[[BuildTrackEvent], None]] = No
             im.close()
         except Exception:
             pass
+
+    prune_empty_dirs(paths["media"])
+    return paths["root"]
+
+
+def build_cd(args, on_track: Optional[Callable[[BuildTrackEvent], None]] = None) -> Path:
+    """Builds a CD pack.
+
+    Unlike cassettes/vinyls, every CD item shares one fixed default design
+    (icon/model/texture) -- there is no per-song cover art and no random
+    variant pool, so nothing here can produce duplicate/mismatched designs
+    by construction: all CDs simply point at the same CD_ICON/CD_MODEL_NAME.
+    CDs also don't support a B-side (unlike cassettes/vinyls): each track
+    becomes exactly one CD item.
+    """
+    ordered_oggs = [Path(p) for p in (getattr(args, "ordered_oggs", None) or [])]
+    oggs = [p for p in ordered_oggs if p.exists() and p.is_file() and p.suffix.lower() == ".ogg"] or find_oggs(args.audio_dir)
+    if not oggs:
+        raise SystemExit(f"No .ogg files found in: {args.audio_dir}")
+
+    paths = build_mod_layout(args.out_dir, args.mod_id)
+    write_mod_info(
+        paths["mod_base"],
+        paths["v42"],
+        args.name,
+        args.mod_id,
+        getattr(args, "parent_mod_id", "TrueMoozic"),
+        getattr(args, "author", "local-builder"),
+    )
+    write_workshop(
+        paths["root"],
+        args.name,
+        workshop_song_lines(
+            oggs,
+            {},
+            getattr(args, "song_display_names", {}) or {},
+            {
+                ogg.name: _workshop_mode_label(False, False, bool(_read_mix_metadata(ogg)), include_cd=True)
+                for ogg in oggs
+            },
+        ),
+    )
+    write_workshop_images(
+        paths,
+        args.workshop_cover,
+        args.name,
+        add_name_overlay=bool(getattr(args, "add_name_to_poster", True)),
+    )
+    standalone_defs_module = "TCMusicDefenitions"
+    if bool(getattr(args, "standalone_bundle", False)):
+        bundle_standalone_redundancy(paths, args.assets_root)
+        standalone_defs_module = write_standalone_music_defs(paths["lua_shared"], args.mod_id)
+
+    sounds = [f"module {args.mod_id}", "{"]
+    items = [f"module {args.mod_id}", "{", "\timports", "\t{", "\t\tBase", "\t}", ""]
+    models = [
+        f"module {args.mod_id}",
+        "{",
+        "\timports",
+        "\t{",
+        "\t\tBase",
+        "\t}",
+        "",
+        f"\tmodel {CD_MODEL_NAME}",
+        "\t{",
+        f"\t\tmesh = {CD_MESH},",
+        f"\t\ttexture = {CD_TEXTURE},",
+        "\t\tscale = 0.0005,",
+        "\t}",
+        "",
+    ]
+    musicdefs = [f'require "{standalone_defs_module}"', ""]
+
+    song_display_names = getattr(args, "song_display_names", {}) or {}
+    total_tracks = len(oggs)
+    used_item_ids: set[str] = set()
+
+    for idx, ogg in enumerate(oggs, start=1):
+        iid = unique_sanitize_id(ogg.name, used_item_ids)
+        disp = str(song_display_names.get(ogg.name) or display_name_from_file(ogg))
+        disp_script = _pz_safe_display_text(disp)
+        cd_display_name = f"CD {disp_script}"
+
+        ogg_out_name = _safe_audio_output_name(ogg.name)
+        shutil.copy2(ogg, paths["sound"] / ogg_out_name)
+
+        sounds.extend(
+            [
+                f"\tsound CD{iid}",
+                "\t{",
+                "\t\tcategory = True Music,",
+                "\t\tmaster = Ambient,",
+                "\t\tclip",
+                "\t\t{",
+                f"\t\t\tfile = media/sound/{args.mod_id}/{ogg_out_name},",
+                "\t\t\tdistanceMax = 75,",
+                "\t\t}",
+                "\t}",
+            ]
+        )
+        items.extend(
+            [
+                f"\titem CD{iid}",
+                "\t{",
+                "\t\tItemType\t\t=\tbase:normal,",
+                "\t\tDisplayCategory = Entertainment,",
+                "\t\tWeight\t\t\t=\t0.02,",
+                f"\t\tIcon\t\t\t=\t{CD_ICON},",
+                f"\t\tDisplayName\t\t=\t{cd_display_name},",
+                f"\t\tWorldStaticModel = {args.mod_id}.{CD_MODEL_NAME},",
+                "\t\tCanSpawn\t\t=\ttrue,",
+                "\t}",
+                "",
+            ]
+        )
+        musicdefs.append(f'GlobalMusic["CD{iid}"] = "{CD_TILE}"')
+
+        if on_track:
+            on_track(BuildTrackEvent(index=idx, total=total_tracks, title=disp_script, thumbnail=None))
+
+    sounds.append("}")
+    items.append("}")
+    models.append("}")
+
+    write(paths["scripts"] / f"{args.mod_id}_CD_Sounds.txt", "\n".join(sounds))
+    write(paths["scripts"] / f"{args.mod_id}_CD_Items.txt", "\n".join(items))
+    write(paths["scripts"] / f"{args.mod_id}_CD_Models.txt", "\n".join(models))
+    write(paths["lua_shared"] / f"{args.mod_id}_MusicDefs_CD.lua", "\n".join(musicdefs) + "\n")
 
     prune_empty_dirs(paths["media"])
     return paths["root"]
@@ -2613,6 +2796,8 @@ def parse_args() -> argparse.Namespace:
         help="Custom vinyl placement mode: inside or outside",
     )
 
+    sub.add_parser("cd", parents=[common], help="Build CD pack (fixed default design, no cover/variant options)")
+
     if len(sys.argv) > 1:
         ns = parser.parse_args()
         if getattr(ns, "mode", None) == "cassette":
@@ -2624,10 +2809,15 @@ def parse_args() -> argparse.Namespace:
 
     while True:
         print("Simple True Moozic Builder (interactive)")
-        mode_raw = _prompt_text("Mode (cassette/vinyl)", required=False).lower()
+        mode_raw = _prompt_text("Mode (cassette/vinyl/cd)", required=False).lower()
         if not mode_raw:
             mode_raw = "cassette"
-        mode = "vinyl" if mode_raw.startswith("v") else "cassette"
+        if mode_raw.startswith("v"):
+            mode = "vinyl"
+        elif mode_raw.startswith("cd"):
+            mode = "cd"
+        else:
+            mode = "cassette"
 
         mod_id = _prompt_text("Mod ID (folder/module id)")
         name = _prompt_text("Display name", mod_id, required=False) or mod_id
@@ -2718,6 +2908,11 @@ def parse_args() -> argparse.Namespace:
                 ns.vinyl_art_placement = "inside"
                 ns.song_covers = {}
                 ns.cover = None
+        elif mode == "cd":
+            # CDs always use the single fixed default design -- no cover,
+            # no seed, no per-song variance to configure.
+            ns.cover = None
+            ns.song_covers = {}
         else:
             custom_raw = input("Custom Cassettes? (y/n): ").strip().lower()
             ns.custom_cassettes = _parse_yes_no(custom_raw, default=False)
@@ -2778,6 +2973,8 @@ def main() -> int:
 
     if args.mode == "cassette":
         out = build_cassette(args)
+    elif args.mode == "cd":
+        out = build_cd(args)
     else:
         out = build_vinyl(args)
 
