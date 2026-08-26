@@ -270,7 +270,7 @@ class SimpleMoozicBuilderUI(ctk.CTk):
         self._hover_tip_window: tk.Toplevel | None = None
         self._window_icon_image: tk.PhotoImage | None = None
         self._window_icon_images: list[tk.PhotoImage] = []
-        self.cd_swith_icon = self._load_ui_icon("CdIcon24.png")
+        self.cd_switch_icon = self._load_ui_icon("CdIcon24.png")
         self.cassette_switch_icon = self._load_ui_icon("CassIcon24.png")
         self.vinyl_switch_icon = self._load_ui_icon("VinylIcon24.png")
 
@@ -519,7 +519,7 @@ class SimpleMoozicBuilderUI(ctk.CTk):
         table_wrap = ctk.CTkFrame(songs, fg_color="transparent")
         table_wrap.pack(fill="both", expand=True)
 
-        cols = ("source", "preview", "status", "cassette", "vinyl", "bside", "cover")
+        cols = ("source", "preview", "status", "cd", "cassette", "vinyl", "bside", "cover")
         self.tree = ttk.Treeview(table_wrap, columns=cols, show="headings", height=14, selectmode="extended")
 
         style = ttk.Style()
@@ -550,6 +550,7 @@ class SimpleMoozicBuilderUI(ctk.CTk):
             ("source", "Song", 330),
             ("preview", "", 40),
             ("status", "Status", 120),
+            ("cd", "CD", 60),
             ("cassette", "Cass", 60),
             ("vinyl", "Vinyl", 60),
             ("bside", "B-Side", 140),
