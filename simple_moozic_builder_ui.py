@@ -270,6 +270,7 @@ class SimpleMoozicBuilderUI(ctk.CTk):
         self._hover_tip_window: tk.Toplevel | None = None
         self._window_icon_image: tk.PhotoImage | None = None
         self._window_icon_images: list[tk.PhotoImage] = []
+        self.cd_swith_icon = self._load_ui_icon("CdIcon24.png")
         self.cassette_switch_icon = self._load_ui_icon("CassIcon24.png")
         self.vinyl_switch_icon = self._load_ui_icon("VinylIcon24.png")
 
@@ -285,6 +286,7 @@ class SimpleMoozicBuilderUI(ctk.CTk):
         self.completion_var = tk.StringVar(value="")
 
         self.selected_ogg_name: str | None = None
+        self.bulk_cd_var = tk.BooleanVar(value=True)
         self.bulk_cassette_var = tk.BooleanVar(value=True)
         self.bulk_vinyl_var = tk.BooleanVar(value=True)
         self.global_vinyl_mask_var = tk.StringVar(value="inside")
@@ -428,6 +430,24 @@ class SimpleMoozicBuilderUI(ctk.CTk):
         btn_default = ctk.CTkButton(controls_row, text="\u25a3", width=40, command=self.apply_default_to_all)
         btn_default.pack(side="left", padx=(0, 6))
         Tooltip(btn_default, "Apply Mod Default to All (Random Textures)")
+
+        cd_switch_wrap = ctk.CTkFrame(controls_row, fg_color="transparent")
+        cd_switch_wrap.pack(side="left", padx=(20, 8))
+        if self.cd_switch_icon is not None:
+            ctk.CTkLabel(cd_switch_wrap, text="", image=self.cd_switch_icon).pack(side="left", padx=(0, 6))
+        else:
+            ctk.CTkLabel(cd_switch_wrap, text="CD").pack(side="left", padx=(0, 6))
+        self.bulk_cd_switch = ctk.CTkSwitch(
+            cd_switch_wrap,
+            text="",
+            width=44,
+            switch_width=36,
+            switch_height=18,
+            variable=self.bulk_cd_var,
+            command=lambda: self.bulk_set("cd", bool(self.bulk_cd_var.get())),
+        )
+        self.bulk_cd_switch.pack(side="left")
+        Tooltip(self.bulk_cd_switch, "Toggle All CDs")
 
         cassette_switch_wrap = ctk.CTkFrame(controls_row, fg_color="transparent")
         cassette_switch_wrap.pack(side="left", padx=(20, 8))
